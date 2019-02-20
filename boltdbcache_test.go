@@ -1,4 +1,4 @@
-package boltdbcache_test
+package boltdbcache
 
 import (
 	"bytes"
@@ -7,42 +7,98 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/birkelund/httpcache/boltdbcache"
+	bolt "go.etcd.io/bbolt"
 )
 
-func TestBoltDBCache(t *testing.T) {
+func setup(t *testing.T) (string, func()) {
 	tempDir, err := ioutil.TempDir("", "httpcache")
 	if err != nil {
-		t.Fatalf("TempDir: %v", err)
+		t.Fatal(err)
 	}
-	defer os.RemoveAll(tempDir)
 
-	cache, err := boltdbcache.New(filepath.Join(tempDir, "db"))
+	return tempDir, func() {
+		os.RemoveAll(tempDir)
+	}
+}
+
+func TestGetNoKey(t *testing.T) {
+	tempDir, teardown := setup(t)
+	defer teardown()
+
+	cache, err := New(filepath.Join(tempDir, "db"))
 	if err != nil {
-		t.Fatalf("boltdbcache.New(): %v", err)
+		t.Fatal(err)
 	}
+	defer cache.Close()
 
-	key := "testKey"
-	_, ok := cache.Get(key)
-	if ok {
+	key := "test"
+	v, ok := cache.Get(key)
+	if ok || v != nil {
 		t.Fatal("retrieved key before adding it")
 	}
+}
 
-	val := []byte("some bytes")
-	cache.Set(key, val)
+func TestSet(t *testing.T) {
+	tempDir, teardown := setup(t)
+	defer teardown()
 
-	retVal, ok := cache.Get(key)
+	cache, err := New(filepath.Join(tempDir, "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cache.Close()
+
+	k := "foo"
+	v := []byte("bar")
+	cache.Set(k, v)
+
+	v2, ok := cache.Get(k)
 	if !ok {
-		t.Fatal("could not retrieve an element we just added")
-	}
-	if !bytes.Equal(retVal, val) {
-		t.Fatal("retrieved a different value than what we put in")
+		t.Fatalf("could not retrieve value for key %q", k)
 	}
 
-	cache.Delete(key)
+	if !bytes.Equal(v, v2) {
+		t.Fatalf("expected %q; got %q", v, v2)
+	}
+}
 
-	_, ok = cache.Get(key)
-	if ok {
-		t.Fatal("deleted key still present")
+func TestDelete(t *testing.T) {
+	tempDir, teardown := setup(t)
+	defer teardown()
+
+	cache, err := New(filepath.Join(tempDir, "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cache.Close()
+
+	k := "foo"
+	v := []byte("bar")
+	cache.Set(k, v)
+
+	v2, ok := cache.Get(k)
+	if !ok {
+		t.Fatalf("could not retrieve value for key %q", k)
+	}
+
+	if !bytes.Equal(v, v2) {
+		t.Fatalf("expected %q; got %q", v, v2)
+	}
+
+	cache.Delete(k)
+
+	v3, ok := cache.Get(k)
+	if ok || v3 != nil {
+		t.Fatalf("key still present")
+	}
+}
+
+func TestNilBucketName(t *testing.T) {
+	tempDir, teardown := setup(t)
+	defer teardown()
+
+	_, err := New(filepath.Join(tempDir, "db"), WithBucketName(""))
+	if err != bolt.ErrBucketNameRequired {
+		t.Fatalf("expected bolt.ErrBucketNameRequired; got %v", err)
 	}
 }
